@@ -13,7 +13,7 @@
 
 
 cJSON *MAIN_JSON_OBJECT;
-
+char* filename = NULL;
 
 cJSON *path_to_json(const char* p)
 {
@@ -56,6 +56,14 @@ cJSON *path_to_json(const char* p)
 
 static int fun_getattr(const char *path, struct stat *stbuf)
 {
+
+	int fd = open(filename, O_RDONLY);
+        int len = lseek(fd, 0, SEEK_END);
+        char* jsonstring = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
+        MAIN_JSON_OBJECT = cJSON_Parse(jsonstring);
+        printf("%s\n", cJSON_Print(MAIN_JSON_OBJECT));
+        close(fd);
+
 
         stbuf->st_uid = getuid();
         stbuf->st_gid = getgid();
@@ -174,25 +182,25 @@ static int fun_open(const char *path, struct fuse_file_info *fi)
         return 0;
 }
 
+static int fun_poll(const char * path, struct fuse_file_info *fi, struct fuse_pollhandle *ph, unsigned *reventsp)
+{
+	printf("polling??\n");
+}
+
 static struct fuse_operations operations = {
     .getattr    = fun_getattr,
     .readdir    = fun_readdir,
     .read       = fun_read,
     .open       = fun_open,
+    .poll	= fun_poll
 };
 
 int main(int argc, char** argv)
 {
         int pos_json = argc - 1;
         int newsize = argc - 1;
+	filename = argv[pos_json];	
 
-        int fd = open(argv[pos_json], O_RDONLY);
-        int len = lseek(fd, 0, SEEK_END);
-        char* jsonstring = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
-        MAIN_JSON_OBJECT = cJSON_Parse(jsonstring);
-        printf("%s\n", cJSON_Print(MAIN_JSON_OBJECT));
-        close(fd);
-        
 
         char** fuse_args = malloc(newsize * sizeof(char*));
         for(int i = 0; i < newsize; i++)
