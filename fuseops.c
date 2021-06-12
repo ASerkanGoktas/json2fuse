@@ -12,8 +12,10 @@
 #include <sys/mman.h>
 
 
-cJSON *MAIN_JSON_OBJECT;
+cJSON *MAIN_JSON_OBJECT = NULL;
 char* filename = NULL;
+char* jsonstring = NULL;
+int jsonfd = 0;
 
 cJSON *path_to_json(const char* p)
 {
@@ -57,39 +59,43 @@ cJSON *path_to_json(const char* p)
 static int fun_getattr(const char *path, struct stat *stbuf)
 {
 
-	int fd = open(filename, O_RDONLY);
-        int len = lseek(fd, 0, SEEK_END);
-        char* jsonstring = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
-        MAIN_JSON_OBJECT = cJSON_Parse(jsonstring);
-        printf("%s\n", cJSON_Print(MAIN_JSON_OBJECT));
-        close(fd);
-
+	int ret = -1;
 
         stbuf->st_uid = getuid();
         stbuf->st_gid = getgid();
         stbuf->st_atime = stbuf->st_mtime = time(NULL);
 
         cJSON* obj = path_to_json(path);
-        if(obj == NULL)
-        {
-                printf("getattr invalid path!: %s\n", path);
-                return -1;
-        }
 
         if(strcmp("/", path) == 0)
         {
                 // root
                 stbuf->st_mode = S_IFDIR | 0755;
                 stbuf->st_nlink = 2;
-                return 0;
+                ret = 0;
+
+                jsonstring = json_to_str();
+                if(MAIN_JSON_OBJECT != NULL)
+                { 
+                        cJSON_Delete(MAIN_JSON_OBJECT);
+                }
+                MAIN_JSON_OBJECT = cJSON_Parse(jsonstring);
+        }
+        else if(obj == NULL)
+        {
+                
+                printf("getattr invalid path!: %s\n", path);
+                ret = -1;
         }
 
-        if(cJSON_IsObject(obj))
+
+
+        else if(cJSON_IsObject(obj))
         {
                 // this is a directory
                 stbuf->st_mode = S_IFDIR | 0755;
                 stbuf->st_nlink = 1;
-                return 0;
+                ret = 0;
         }
         else
         {
@@ -97,20 +103,16 @@ static int fun_getattr(const char *path, struct stat *stbuf)
                 stbuf->st_mode = S_IFREG | 0444;
                 stbuf->st_nlink = 1;
                 stbuf->st_size = strlen(obj->valuestring);
-                return 0;
+                ret = 0;
         }
 
-        printf("getattr error!\n");
-        return -1;
+
+        return ret;
 }
 
 //  will be executed when the system asks for a list of files that were stored in the mount point
 static int fun_readdir(const char *path, void *buff, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
 {
-        //Bash sends "/.Trash" or "autorun.inf" life paths by itself.
-        //These are excluded from our project.
-        
-
         filler(buff, ".", NULL, 0);  //Current directory
         filler(buff, "..", NULL, 0); //Parent directory
 
@@ -182,17 +184,85 @@ static int fun_open(const char *path, struct fuse_file_info *fi)
         return 0;
 }
 
-static int fun_poll(const char * path, struct fuse_file_info *fi, struct fuse_pollhandle *ph, unsigned *reventsp)
+static int fun_write(const char * path, const char * buff, size_t size, off_t offset, struct fuse_file_info * fi)
 {
-	printf("polling??\n");
+	cJSON *obj = path_to_json(path);
+
+	printf("helloooççç\n");
+        if(obj == NULL)
+        {
+                printf("open invalid path!: %s", path);
+                return -1;
+        }
+
+        if(cJSON_IsObject(obj))
+        {
+                printf("%s\n", cJSON_Print(obj));
+                // this should not be a directory
+                return -1;
+        }
+	else
+	{
+		printf("You may only change file contents via input json file!\n");
+		return -1;
+	}
+
+        return 0;
 }
+
+static int fun_rmdir(const char* path)
+{
+	cJSON *obj = path_to_json(path);
+
+        if(obj == NULL)
+        {
+                printf("open invalid path!: %s", path);
+        }
+
+        if(cJSON_IsObject(obj))
+        {
+                printf("You may only delete directories via changing input json file!\n");
+        }
+
+        return -1;
+}
+
+static int fun_mkdir(const char* path, mode_t mode)
+{
+        printf("You may only make directories via changing input json file!\n");
+        return -1;
+}
+
+static int fun_create(const char* path, mode_t mode, struct fuse_file_info *fi)
+{
+	printf("You may only create files via changing input json file!\n");
+        return -1;
+}
+
+static int fun_unlink(const char* path)
+{ 
+        printf("You may only delete files via changing input json file!\n");
+        return -1;
+}
+
+static char* json_to_str()
+{
+        int len = lseek(jsonfd, 0, SEEK_END);
+        jsonstring = mmap(NULL, len, PROT_READ, MAP_PRIVATE, jsonfd, 0);
+        return jsonstring;
+}
+
 
 static struct fuse_operations operations = {
     .getattr    = fun_getattr,
     .readdir    = fun_readdir,
     .read       = fun_read,
     .open       = fun_open,
-    .poll	= fun_poll
+    .write	= fun_write,
+    .rmdir	= fun_rmdir,
+    .mkdir	= fun_mkdir,
+    .create	= fun_create,
+    .unlink	= fun_unlink,
 };
 
 int main(int argc, char** argv)
@@ -206,10 +276,18 @@ int main(int argc, char** argv)
         for(int i = 0; i < newsize; i++)
                 fuse_args[i] = argv[i];
 
+
+        jsonfd = open(filename, O_RDONLY);
+        int len = lseek(jsonfd, 0, SEEK_END);
+        jsonstring = mmap(NULL, len, PROT_READ, MAP_PRIVATE, jsonfd, 0);
+        MAIN_JSON_OBJECT = cJSON_Parse(jsonstring);
+
         int fuse_result = fuse_main(newsize, fuse_args, &operations, NULL);
+
 
         free(fuse_args);
         cJSON_Delete(MAIN_JSON_OBJECT);
+        close(jsonfd);
         
         return fuse_result;
 }
