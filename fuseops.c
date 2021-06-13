@@ -44,7 +44,6 @@ cJSON *path_to_json(const char* p)
                 leaf = cJSON_GetObjectItemCaseSensitive(parent, token);
                 if(leaf == NULL)
                 {
-                        printf("invalid!\n");
                         invalidpath = 1;
                         break;
                 }
@@ -58,7 +57,6 @@ cJSON *path_to_json(const char* p)
 
 static int fun_getattr(const char *path, struct stat *stbuf)
 {
-
 	int ret = -1;
 
         stbuf->st_uid = getuid();
@@ -66,7 +64,6 @@ static int fun_getattr(const char *path, struct stat *stbuf)
         stbuf->st_atime = stbuf->st_mtime = time(NULL);
 
         cJSON* obj = path_to_json(path);
-
         if(strcmp("/", path) == 0)
         {
                 // root
@@ -74,22 +71,11 @@ static int fun_getattr(const char *path, struct stat *stbuf)
                 stbuf->st_nlink = 2;
                 ret = 0;
 
-                jsonstring = json_to_str();
-                if(MAIN_JSON_OBJECT != NULL)
-                { 
-                        cJSON_Delete(MAIN_JSON_OBJECT);
-                }
-                MAIN_JSON_OBJECT = cJSON_Parse(jsonstring);
         }
         else if(obj == NULL)
         {
-                
-                printf("getattr invalid path!: %s\n", path);
                 ret = -1;
         }
-
-
-
         else if(cJSON_IsObject(obj))
         {
                 // this is a directory
@@ -100,12 +86,11 @@ static int fun_getattr(const char *path, struct stat *stbuf)
         else
         {
                 // this is a regular file
-                stbuf->st_mode = S_IFREG | 0444;
+                stbuf->st_mode = S_IFREG | 0644;
                 stbuf->st_nlink = 1;
                 stbuf->st_size = strlen(obj->valuestring);
                 ret = 0;
         }
-
 
         return ret;
 }
@@ -187,27 +172,28 @@ static int fun_open(const char *path, struct fuse_file_info *fi)
 static int fun_write(const char * path, const char * buff, size_t size, off_t offset, struct fuse_file_info * fi)
 {
 	cJSON *obj = path_to_json(path);
-
-	printf("helloooççç\n");
         if(obj == NULL)
         {
-                printf("open invalid path!: %s", path);
                 return -1;
         }
 
         if(cJSON_IsObject(obj))
         {
-                printf("%s\n", cJSON_Print(obj));
                 // this should not be a directory
                 return -1;
         }
 	else
-	{
-		printf("You may only change file contents via input json file!\n");
-		return -1;
+	{       
+                // free(obj->valuestring); // TODO memory leak
+                char* s = calloc(size, sizeof(char));
+                memcpy(s, buff, size);
+                s[size] = NULL;
+                cJSON_SetValuestring(obj, s);
+                free(s);
+                return size;
 	}
-
-        return 0;
+        
+        return -1;
 }
 
 static int fun_rmdir(const char* path)
@@ -221,6 +207,7 @@ static int fun_rmdir(const char* path)
 
         if(cJSON_IsObject(obj))
         {
+
                 printf("You may only delete directories via changing input json file!\n");
         }
 
@@ -245,13 +232,10 @@ static int fun_unlink(const char* path)
         return -1;
 }
 
-static char* json_to_str()
+int fun_truncate(const char * path, off_t offset, struct fuse_file_info *fi)
 {
-        int len = lseek(jsonfd, 0, SEEK_END);
-        jsonstring = mmap(NULL, len, PROT_READ, MAP_PRIVATE, jsonfd, 0);
-        return jsonstring;
+        return 0;
 }
-
 
 static struct fuse_operations operations = {
     .getattr    = fun_getattr,
@@ -263,6 +247,7 @@ static struct fuse_operations operations = {
     .mkdir	= fun_mkdir,
     .create	= fun_create,
     .unlink	= fun_unlink,
+    .truncate   = fun_truncate,
 };
 
 int main(int argc, char** argv)
@@ -277,17 +262,26 @@ int main(int argc, char** argv)
                 fuse_args[i] = argv[i];
 
 
-        jsonfd = open(filename, O_RDONLY);
+        // parsing the json file
+        jsonfd = open(filename, O_RDWR);
         int len = lseek(jsonfd, 0, SEEK_END);
         jsonstring = mmap(NULL, len, PROT_READ, MAP_PRIVATE, jsonfd, 0);
         MAIN_JSON_OBJECT = cJSON_Parse(jsonstring);
+        close(jsonfd);
 
+        // fuse main
         int fuse_result = fuse_main(newsize, fuse_args, &operations, NULL);
-
-
+        printf("filesystem closing...\n");
+        
+        // saving the changes to the file system
+        const char* out = cJSON_Print(MAIN_JSON_OBJECT);
+        FILE* f = fopen(filename, "w");
+        fprintf(f, "%s", out);
+        fclose(f);
+        
+        // clean up
         free(fuse_args);
         cJSON_Delete(MAIN_JSON_OBJECT);
-        close(jsonfd);
         
         return fuse_result;
 }
