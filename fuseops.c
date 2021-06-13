@@ -101,6 +101,25 @@ cJSON* get_parent(const char* p)
         return parent;
 }
 
+void read_the_structure()
+{
+        cJSON_Delete(MAIN_JSON_OBJECT);
+        MAIN_JSON_OBJECT = NULL;
+                // parsing the json file
+        jsonfd = open(filename, O_RDWR);
+        int len = lseek(jsonfd, 0, SEEK_END);
+        jsonstring = mmap(NULL, len, PROT_READ, MAP_PRIVATE, jsonfd, 0);
+        MAIN_JSON_OBJECT = cJSON_Parse(jsonstring);
+        close(jsonfd);
+}
+
+void update_the_structure()
+{
+        FILE* f = fopen(filename, "w");
+        fprintf(f, "%s", cJSON_Print(MAIN_JSON_OBJECT));
+        fclose(f);
+}
+
 
 static int fun_getattr(const char *path, struct stat *stbuf)
 {
@@ -113,6 +132,7 @@ static int fun_getattr(const char *path, struct stat *stbuf)
         cJSON* obj = path_to_json(path);
         if(strcmp("/", path) == 0)
         {
+                read_the_structure();
                 // root
                 stbuf->st_mode = S_IFDIR | 0755;
                 stbuf->st_nlink = 2;
@@ -237,6 +257,7 @@ static int fun_write(const char * path, const char * buff, size_t size, off_t of
                 s[size] = NULL;
                 cJSON_SetValuestring(obj, s);
                 free(s);
+                update_the_structure();
                 return size;
 	}
         
@@ -257,6 +278,7 @@ static int fun_rmdir(const char* path)
                 cJSON* parent = get_parent(path);
                 cJSON_DetachItemViaPointer(parent, obj);
                 cJSON_free(obj);
+                update_the_structure();
                 return 0;
         }
 
@@ -290,6 +312,7 @@ static int fun_mkdir(const char* path, mode_t mode)
 
         int indexstart = strlen(path) - len_directory_name;
         cJSON_AddObjectToObject(obj, path + (strlen(path) - len_directory_name));
+        update_the_structure();
         free(parentpath);
 
         return 0;
@@ -322,6 +345,7 @@ static int fun_create(const char* path, mode_t mode, struct fuse_file_info *fi)
 
         int indexstart = strlen(path) - len_directory_name;
         cJSON_AddStringToObject(obj, path + (strlen(path) - len_directory_name), "");
+        update_the_structure();
         free(parentpath);
 
         return 0;
@@ -342,6 +366,7 @@ static int fun_unlink(const char* path)
         {
                 cJSON* parent = get_parent(path);
                 cJSON_DetachItemViaPointer(parent, obj);
+                update_the_structure();
                 cJSON_free(obj);
                 return 0;
         }
