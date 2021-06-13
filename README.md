@@ -1,6 +1,6 @@
 # json2fuse
 
-A fuse implementation which uses json file as a source of file structure. The filesystem is read-only, however, it can be changed by changing the input file-structure json file.
+A fuse implementation which uses json file as a source of file structure. json2fuse works both ways. The changes you make to the json file will be visible in the file system, also, when you make changes in the file system, it will be written to json file.
 
 ## Dependencies
 - `cJSON 1.7.14`
